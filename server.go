@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"go-n0nz-linebot-101/consumer"
 	"go-n0nz-linebot-101/producer"
 
 	"github.com/joho/godotenv"
@@ -15,8 +16,10 @@ import (
 )
 
 type producedMessage struct {
-	Id      string `json:"id"`
-	Message string `json:"message"`
+	Id          string `json:"id"`
+	Message     string `json:"message"`
+	LineUsrName string `json:"line_usr_name"`
+	ReplyToken  string `json:"reply_token"`
 }
 
 func main() {
@@ -33,10 +36,15 @@ func main() {
 	}
 
 	// Initialize kafka producer
-	err = producer.InitKafka()
-	if err != nil {
+	if err = producer.InitKafka(); err != nil {
 		log.Fatal("Kafka producer ERROR: ", err)
 	}
+
+	if err := consumer.InitKafka(); err != nil {
+		log.Fatal("Kafka consumer ERROR: ", err)
+	}
+
+	topics := "user-messages"
 
 	// Initilaze Echo web server
 	e := echo.New()
@@ -53,30 +61,65 @@ func main() {
 			// Do something when something bad happened.
 		}
 
-		topics := "user-messages"
-
 		for _, event := range events {
 			if event.Type == linebot.EventTypeMessage {
 				switch message := event.Message.(type) {
 				case *linebot.TextMessage:
 					messageJson, _ := json.Marshal(&producedMessage{
-						Id:      message.ID,
-						Message: message.Text,
+						Id:          message.ID,
+						Message:     message.Text,
+						ReplyToken:  event.ReplyToken,
+						LineUsrName: event.Source.UserID,
 					})
 					producerErr := producer.Produce(topics, string(messageJson))
 					if producerErr != nil {
-						log.Print(err)
+						log.Print("Produce error: ", err)
 					} else {
-						messageResponse := fmt.Sprintf("Produced [%s] successfully", message.Text)
-						if _, err = bot.ReplyMessage(event.ReplyToken, linebot.NewTextMessage(messageResponse)).Do(); err != nil {
-							log.Print(err)
-						}
+						fmt.Printf("Produced [%s] successfully", message.Text)
+						//if _, err = bot.ReplyMessage(event.ReplyToken, linebot.NewTextMessage(messageResponse)).Do(); err != nil {
+						//	log.Printf("Producer Reply %s error: %s", event.ReplyToken, err)
+						//}
 					}
 				}
 			}
 		}
 		return c.String(http.StatusOK, "OK!")
 	})
+
+	msgChan := make(chan string)
+	go func() {
+		if err := consumer.Consume(topics, &msgChan); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case m, ok := <-msgChan:
+				if !ok {
+					log.Printf("Message from channel not ok: %v", ok)
+					continue
+				}
+				log.Printf("Message from channel: %s", m)
+
+				var msg producedMessage
+				if err := json.Unmarshal([]byte(m), &msg); err != nil {
+					fmt.Printf("Unable to parse %s, error: %s", m, err)
+					continue
+				}
+
+				rsp := fmt.Sprintf("ข้อความของคุณ %s ได้รับการประมวลผลเรียบร้อยแล้ว (%s)",
+					msg.LineUsrName, msg.Message)
+
+				log.Printf("replying message: %s", m)
+
+				if _, err = bot.ReplyMessage(msg.ReplyToken, linebot.NewTextMessage(rsp)).Do(); err != nil {
+					log.Printf("Consumer Reply %s error: %s", msg.ReplyToken, err)
+				}
+			}
+		}
+	}()
 
 	e.Logger.Fatal(e.Start(":1323"))
 }

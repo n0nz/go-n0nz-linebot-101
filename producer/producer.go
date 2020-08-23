@@ -11,7 +11,9 @@ var producer *kafka.Producer
 
 func InitKafka() error {
 	var err error
-	producer, err = kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": os.Getenv("BOOTSTRAP_SERVERS")})
+	producer, err = kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers": os.Getenv("BOOTSTRAP_SERVERS"),
+	})
 	return err
 }
 
