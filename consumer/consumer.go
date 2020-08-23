@@ -29,7 +29,7 @@ func Consume(topics string, msgChan *chan string) error {
 		if err == nil {
 			fmt.Printf("Message on %s: %s\n", msg.TopicPartition, string(msg.Value))
 
-			// TODO do something later
+			// TODO
 
 			*msgChan <- string(msg.Value)
 		} else {
